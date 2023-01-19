@@ -1,0 +1,166 @@
+version: '3.4'
+
+services:
+  roomshare-room-service-command:
+    image: luanprado7/roomshare_room_service_command:latest
+    #image: roomshare_room_service_command
+    #build:
+    #  context: .
+    #  dockerfile: roomshare-room-service/Dockerfile
+    depends_on: 
+          - database
+          - broker
+    ports:
+        - "5000:80"
+    restart: always
+    environment: 
+        - DBHOST=database
+        - ASPNETCORE_ENVIRONMENT=Development
+        - KAFKAHOST=broker
+        - KAFKAPORT=19092
+        - WEBHOOK=https://fiapcom.webhook.office.com/webhookb2/8cf1d42e-933f-4b80-9131-bb37825418c5@11dbbfe2-89b8-4549-be10-cec364e59551/IncomingWebhook/8192303831d148bf96360aa6bffdaadd/033221b5-17e5-4b3f-a083-a40cfae369f7
+
+  database:
+    image: mysql:8.0.22
+    container_name: mysqldb_roomshare
+    ports:
+        - "3306:3306"
+    expose: 
+        - 3306
+    volumes:
+        - db-volume:/var/lib/mysql
+    restart: always
+    environment: 
+        MYSQL_ROOT_PASSWORD: admin
+        MYSQL_USER: root
+        MYSQL_PASSWORD: admin
+        MYSQL_DATABASE: roomshare_room_api
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.1.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-server:5.5.10
+    hostname: broker
+    container_name: broker
+    depends_on:
+        - zookeeper
+    ports:
+        - "9092:9092"
+        - "19092:19092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER_INTERNAL://broker:19092,LISTENER_DOCKER_EXTERNAL://127.0.0.1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: broker:19092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:6.1.0
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - broker
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:19092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:6.1.0
+    hostname: control-center
+    container_name: control-center
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "9021:9021"
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker:19092'
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      PORT: 9021
+
+  roomshare-room-service-consumer:
+    image: luanprado7/roomshare_room_service_consumer:latest
+    #image: roomshare_room_service_consumer
+    #build:
+    #  context: ../roomshare-room-service-consumer/
+    #  dockerfile: Dockerfile
+    depends_on:           
+          - roomshare-room-service-query
+    ports:
+        - "5001:80"
+    restart: always
+    environment: 
+        - ASPNETCORE_ENVIRONMENT=Development
+        - KAFKAHOST=broker
+        - KAFKAPORT=19092
+  
+  roomshare-room-service-query:
+    image: luanprado7/roomshare_room_service_query:latest
+    #image: roomshare_room_service_query
+    #build:
+    #  context: ../roomshare-room-service-query/
+    #  dockerfile: roomshare-room-service-query/Dockerfile
+    depends_on:           
+          - broker
+    ports:
+        - "5002:80"
+    restart: always
+    environment: 
+        - ASPNETCORE_ENVIRONMENT=Development
+
+  roomshare-room-service-auth:
+    image: luanprado7/roomshare_auth_api:latest
+    #image: roomshare_room_service_auth
+    #build:
+    #  context: ../roomshare-room-service-auth/
+    #  dockerfile: auth-api/Dockerfile
+    ports:
+        - "5003:80"
+    restart: always
+    environment: 
+        - ASPNETCORE_ENVIRONMENT=Development
+        - DBHOST=database
+
+  mongodb:
+    image : mongo
+    container_name: mongodb
+    environment:
+    - PUID=1000
+    - PGID=1000
+    volumes:
+    - /etc/mongodb/database:/data/db
+    ports:
+    - 27017:27017
+    restart: unless-stopped
+
+volumes:
+    db-volume:
